@@ -1,0 +1,238 @@
+---
+title: "Homework 3"
+author: "Riccardo Gobbo & Giorgia Vicari"
+output: html_document
+---
+
+
+Our purpose is to study the dependency among some standard measures of stock relative performance. For doing this, we're going to collect the daily closing prices between 1st January 2003 and 1st January 2008 for a certain number of stocks (exactly 60) considering those in the S&P500 index. Our initial hypotesis is that stocks from the same GICS sector will tend to be clustered together since the main idea is that they should iteract more with each other. Hence, we want to test this assumption.  
+
+First, we build our data matrix selecting a sensible portfolio of stocks. Then, we compute the *Pearson* correlation matrix.
+
+```{r, message = FALSE, warning=FALSE, results='hide'}
+set.seed(1)
+library(tseries)
+library(zoo)
+
+# Load the package
+require(tseries, quietly = TRUE)
+
+# Our stocks
+
+cd<-c("HAS", "TIF","AAP","AMZN","AZO","KMX")
+cs<-c("CLX", "WMT", "CAG","CL","STZ","COST")
+en<-c( "OXY", "EOG", "MRO", "DVN","APC","APA")
+fi<-c("BAC", "WFC", "GS", "KEY","AMG","AIG")
+hc<-c("LLY", "BSX", "UNH","AET","A","ANTM")
+ind<-c("FDX", "UPS", "DOV","CAT","DE", "ROK")
+it<-c("INTC", "MSFT", "AMD","EBAY","NVDA","APH")
+ma<-c("ECL", "VMC","FMC","IP","NUE","SEE")
+tcs<-c("CTL", "VZ", "T","BCE","TU","SHEN")
+ut<-c("AEE", "DUK", "NEE", "CNP","XEL","ETR")
+
+industries<-c(cd, cs, en, fi, hc, ind, it, ma, tcs, ut)
+
+# Create matrix X
+X=matrix(NA, nrow = 1257, ncol = 60)
+i=1
+for (industr in industries){
+a<-suppressWarnings(get.hist.quote(instrument=industr, start="2003-01-01", end="2008-01-01", 
+                                   quote=c("Open","Close"), provider="yahoo", drop=TRUE))
+tsa<-diff(log(a$Close))
+X[,i]<-coredata(tsa)
+i=i+1
+}
+
+colnames(X) <- industries
+
+# Correlation matrix
+corrX <- cor(X) 
+
+```
+
+
+Here we are implementing a bootstrap procedure, with the objective of building a marginal correlation graph. Since it's very unlikely to find stocks without any correlation, we decided to test the hypotesis that the correlation is high, selecting $|\epsilon|>0.40$.
+
+```{r, message = FALSE, warning=FALSE}
+# MARGINAL CORRELATION GRAPH
+set.seed(1)
+library(igraph)
+
+B=1000
+deltaB<-rep(NA, B)
+for (i in 1:B){
+  bootX<-X[sample(nrow(X), size = 1000, replace=FALSE),]
+  #we're using a bootstrap procedure picking a smaller sample   without replace
+  bootCorR<-cor(bootX)
+  deltaB[i]<-sqrt(nrow(X))*max(abs(bootCorR-corrX))
+}
+
+epsilon=0.40
+alpha=0.05/(59*30)  #we're using Bonferroni correction
+confintUpper<-corrX+(quantile(deltaB, 1-alpha)/sqrt(nrow(X)))
+confintLower<-corrX-(quantile(deltaB, alpha)/sqrt(nrow(X)))
+
+#adjacency matrix
+adjmat<-matrix(NA, nrow(corrX), ncol(corrX))
+for (j in 1:nrow(corrX)){
+  for (k in 1:ncol(corrX)){
+    if ((confintUpper[j,k]<(-epsilon)) || (confintLower[j,k]>epsilon)){
+      adjmat[j,k]<-1
+    }
+    else {
+      adjmat[j,k]<-0
+    }
+  }
+}
+
+corrgraph = graph.adjacency(adjmat, mode = "undirected", diag = F)
+
+```
+
+
+Just have a look to our bootstrapped ECDF...
+```{r, fig.align="center"}
+# OUR ECDF
+plot(ecdf(deltaB), main = "Bootstrapped ECDF", ylab='ecdf(x)', col="blue")
+```
+
+
+Now, we can visualize our marginal correlation graph!
+
+```{r, message = FALSE, warning=FALSE, fig.width = 11, fig.asp = .92, , fig.align="center"}
+
+set.seed(1)
+
+V(corrgraph)$color[1:6] <- "pink"
+V(corrgraph)$color[7:12] <- "yellow"
+V(corrgraph)$color[13:18] <- "green"
+V(corrgraph)$color[19:24] <- "orchid" 
+V(corrgraph)$color[25:30] <- "light blue"
+V(corrgraph)$color[31:36] <- "red"
+V(corrgraph)$color[37:42] <- "orange" 
+V(corrgraph)$color[43:48] <- "grey"
+V(corrgraph)$color[49:54] <- "purple"
+V(corrgraph)$color[55:60] <- "blue"
+
+V(corrgraph)$name <- industries
+
+plot(corrgraph, 
+    vertex.size=10,
+    vertex.label.cex=0.70,
+    vertex.label.color="black",
+    vertex.frame.color="transparent", main = "Stock Relations"
+    )
+
+sectors<-c("Consumer Discretionary", "Consumer Staples", "Energy", "Financials", "Health Care", "Industrials", "Information Technology", "Materials", "Telecom. Services", "Utilities")
+
+legend(x = 0.95, y = 1, legend=levels(as.factor(sectors)), 
+        col = c("pink","yellow","green","orchid","light blue", "red","orange","grey","purple","blue") ,
+        bty = "o", 
+        pch=16, 
+        pt.cex = 1.2, 
+        cex = 0.8,
+        horiz = FALSE, 
+        inset = c(0.001, 0.001),
+        ncol = 1
+        )
+```
+
+From this plot we can see the realization of what we expected. In fact, by assigning a color to each sector, it's evident the presence of clusters concerning the stocks more correlated with each others, since that they're in the same industry.   
+There are few exceptions but not so senseless. For example the stock "*Agilent Technology Inc*" (**A**) is linked to industries which belongs to *Information Technology*, in fact it is a company that provides softwares to help health analysis, hence it makes sense.  
+Indeed, financial market's dynamics contemplate exactly this phenomenon. It is usual that different industries interact with each other, for instance the *Industrial* sector is correlated with the *Materials* industry since most of manufacturing companies are highly affected by trends characterizing raw material companies, leading to high degree of correlation between stock prices.
+
+
+Now we're using the same procedure as before, referring to a different association measure: *Spearman correlation*.
+
+```{r}
+#Spearman
+#library(pcaPP) to calculate Kendall's corr.
+
+set.seed(1)
+deltaB<-rep(NA, B)
+for (i in 1:B){
+  bootX<-X[sample(nrow(X), size = 1000, replace=FALSE),]
+  #we're using a bootstrap procedure picking a smaller sample without replace
+  #bootCorR<-cor.fk(bootX)
+  bootCorR<-cor(bootX, method = "spearman")
+  deltaB[i]<-sqrt(nrow(X))*max(abs(bootCorR-corrX))
+}
+
+epsilon=0.40
+alpha=0.05/(59*30)   #Bonferroni correction
+confintUpper<-corrX+(quantile(deltaB, 1-alpha)/sqrt(nrow(X)))
+confintLower<-corrX-(quantile(deltaB, alpha)/sqrt(nrow(X)))
+
+#adjacency matrix
+adjmat<-matrix(NA, nrow(corrX), ncol(corrX))
+for (j in 1:nrow(corrX)){
+  for (k in 1:ncol(corrX)){
+    if ((confintUpper[j,k]<(-epsilon)) || (confintLower[j,k]>epsilon)){
+      adjmat[j,k]<-1
+    }
+    else {
+      adjmat[j,k]<-0
+    }
+  }
+}
+
+corrgraph = graph.adjacency(adjmat, mode = "undirected", diag = F)
+
+```
+
+Just have a look to our bootstrapped ECDF...
+```{r, fig.align="center"}
+# OUR ECDF
+plot(ecdf(deltaB), main = "Bootstrapped ECDF", ylab='ecdf(x)', col="blue")
+```
+
+To better understand our results, we are going to plot everything.  
+
+```{r, message = FALSE, warning=FALSE, fig.width = 11, fig.asp = .92, fig.align="center"}
+set.seed(1)
+V(corrgraph)$color[1:6] <- "pink"
+V(corrgraph)$color[7:12] <- "yellow"
+V(corrgraph)$color[13:18] <- "green"
+V(corrgraph)$color[19:24] <- "orchid" 
+V(corrgraph)$color[25:30] <- "light blue"
+V(corrgraph)$color[31:36] <- "red"
+V(corrgraph)$color[37:42] <- "orange" 
+V(corrgraph)$color[43:48] <- "grey"
+V(corrgraph)$color[49:54] <- "purple"
+V(corrgraph)$color[55:60] <- "blue"
+
+V(corrgraph)$name <- industries
+
+plot(corrgraph, 
+    vertex.size=10,
+    vertex.label.cex=0.55,
+    vertex.label.color="black",
+    vertex.frame.color="transparent",
+    main = "Stock relations"
+    )
+
+sectors<-c("Consumer Discretionary", "Consumer Staples", "Energy", "Financials", "Health Care", "Industrials", "Information Technology", "Materials", "Telecom. Services", "Utilities")
+
+
+legend(x = -1.4, y = -1, legend=levels(as.factor(sectors)), 
+        col = c("pink","yellow","green","orchid","light blue", "red","orange","grey","purple","blue") ,
+        bty = "o", 
+        pch=16, 
+        pt.cex = 1.2, 
+        cex = 0.8,
+        horiz = FALSE, 
+        inset = c(0.001, 0.001),
+        ncol = 2
+        )
+```
+
+Using a different association measure we get something different, but not excessively contrary to our starting hypotesis. In fact, there are 5 main clusters composed by stocks of the same sector. These refer to:   
+- Utilities  
+- Energy  
+- Financials  
+- Health care  
+- Industrials  
+sectors and, this is coherent with our first graph, where these groups are between the most correlated.  
+In conclusion, we can assert that the results are similar, but maybe using the Pearson correlation is better... not a coincidence that it is the most used measure in stock analysis!
+
+
